@@ -14,15 +14,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return Q1
 
-# Здесь будут обработчики для каждого шага (мы добавим их вместе)
-
 def main():
     app = ApplicationBuilder().token("7972507271:AAFbXmlHfqH5x-LXR0TUDHVrDJerv3Cx4t4").build()
 
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
         states={
-            # Здесь будут состояния и обработчики
+            Q1: [MessageHandler(filters.TEXT & ~filters.COMMAND, q1)],
+            # Здесь будут следующие шаги
         },
         fallbacks=[]
     )
