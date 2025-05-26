@@ -154,7 +154,7 @@ async def final(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 def main():
-    app = ApplicationBuilder().token("7972507271:AAFbXmlHfqH5x-LXR0TUDHVrDJerv3Cx4t4").build()
+    app = ApplicationBuilder().token("7950791928:AAFvhWZMlthDlOB2SExxzhiu0M2djDrHsME").build()
 
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
