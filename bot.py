@@ -14,6 +14,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return Q1
 
+async def q1(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    answer = update.message.text
+    if answer == "5 лет и более":
+        await update.message.reply_text(
+            "Ваше пребывание за последние 5 лет должно быть непрерывным. "
+            "За 5 лет вы должны находиться за пределами Польши не более чем 10 месяцев в сумме, "
+            "а один выезд не должен превышать 6 месяцев. Это условие соблюдено?",
+            reply_markup=ReplyKeyboardMarkup([["Да", "Нет", "Не могу разобраться"]], one_time_keyboard=True)
+        )
+        return Q2
+    else:
+        await update.message.reply_text(
+            "Вам пока рано подаваться на карту резидента. Хотите всё равно ознакомиться с требованиями заранее?",
+            reply_markup=ReplyKeyboardMarkup([["Да", "Нет"]], one_time_keyboard=True)
+        )
+        return FINAL
+
 def main():
     app = ApplicationBuilder().token("7972507271:AAFbXmlHfqH5x-LXR0TUDHVrDJerv3Cx4t4").build()
 
