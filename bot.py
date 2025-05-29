@@ -13,7 +13,7 @@ from telegram.ext import (
 ADMIN_CHAT_ID = -1002562481191
 
 # Телефон для консультаций (замени на нужный, если потребуется)
-CONSULT_PHONE = "+48 123 456 789"
+CONSULT_PHONE = "+48 791 787 071"
 
 # --- База пользователей ---
 def init_db():
