@@ -1,13 +1,20 @@
 import sqlite3
 from datetime import datetime
-from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram import (
+    Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, InputMediaPhoto, InputMediaVideo
+)
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler, filters,
     ConversationHandler, ContextTypes
 )
 
+# --- Админы по username ---
+ADMIN_USERNAMES = ["Anastasia_Kulesh", "belarus79"]
+
 # Состояния опроса
 (Q1, Q2, Q3, Q4, Q5, Q6, Q7, Q_DATES, Q_DATES_MORE, FINAL, QUESTION) = range(11)
+# Состояния для рассылки
+(BROADCAST_TAGS, BROADCAST_CONTENT, BROADCAST_CONFIRM) = range(100, 103)
 
 # ID чата для заявок
 ADMIN_CHAT_ID = -1002562481191
@@ -69,6 +76,184 @@ def update_user_tags(user_id, tags):
     c.execute('UPDATE users SET tags=? WHERE user_id=?', (tags, user_id))
     conn.commit()
     conn.close()
+
+def get_users_by_tags(tags=None):
+    conn = sqlite3.connect("users.db")
+    c = conn.cursor()
+    if not tags or tags == ["всем"]:
+        c.execute("SELECT user_id FROM users")
+        users = [row[0] for row in c.fetchall()]
+        conn.close()
+        return users
+    else:
+        query = "SELECT user_id, tags FROM users"
+        c.execute(query)
+        users = []
+        for user_id, user_tags in c.fetchall():
+            if user_tags:
+                user_tag_set = set(user_tags.split(","))
+                if any(tag in user_tag_set for tag in tags):
+                    users.append(user_id)
+        conn.close()
+        return users
+
+def export_users_csv():
+    import csv
+    filename = "users_export.csv"
+    conn = sqlite3.connect("users.db")
+    c = conn.cursor()
+    c.execute("SELECT user_id, username, first_name, last_name, city, tags, first_seen, last_seen FROM users")
+    rows = c.fetchall()
+    conn.close()
+    with open(filename, "w", newline='', encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["user_id", "username", "first_name", "last_name", "city", "tags", "first_seen", "last_seen"])
+        writer.writerows(rows)
+    return filename
+
+def get_tag_stats():
+    conn = sqlite3.connect("users.db")
+    c = conn.cursor()
+    c.execute("SELECT tags FROM users")
+    tag_counts = {}
+    for (tags,) in c.fetchall():
+        if tags:
+            for tag in tags.split(","):
+                tag = tag.strip()
+                if tag:
+                    tag_counts[tag] = tag_counts.get(tag, 0) + 1
+    conn.close()
+    return tag_counts
+
+# --- Проверка, админ ли пользователь ---
+def is_admin(user):
+    return (user.username in ADMIN_USERNAMES)
+
+# --- Админ-панель ---
+async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not is_admin(user):
+        await update.message.reply_text("Нет доступа.")
+        return
+    await update.message.reply_text(
+        "👑 Админ-панель:\n"
+        "/broadcast — рассылка\n"
+        "/export_users — выгрузка базы\n"
+        "/stats — статистика по тегам"
+    )
+
+# --- /broadcast рассылка ---
+async def broadcast_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not is_admin(user):
+        await update.message.reply_text("Нет доступа.")
+        return ConversationHandler.END
+    await update.message.reply_text(
+        "Введи теги через запятую (например: ok_stay,fail_income) или напиши 'всем' для рассылки всем пользователям."
+    )
+    context.user_data.clear()
+    return BROADCAST_TAGS
+
+async def broadcast_tags(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    tags = [t.strip() for t in update.message.text.lower().split(",")]
+    context.user_data["broadcast_tags"] = tags
+    await update.message.reply_text(
+        "Отправь текст, фото или видео для рассылки. Можно отправить только текст, только фото/видео или всё вместе.\n"
+        "Если хочешь добавить подпись к фото/видео — сначала отправь медиа, потом подпись отдельным сообщением.\n"
+        "Когда всё готово — напиши 'Готово'."
+    )
+    context.user_data["broadcast_media"] = []
+    context.user_data["broadcast_text"] = ""
+    return BROADCAST_CONTENT
+
+async def broadcast_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.photo:
+        file_id = update.message.photo[-1].file_id
+        context.user_data["broadcast_media"].append(("photo", file_id))
+    elif update.message.video:
+        file_id = update.message.video.file_id
+        context.user_data["broadcast_media"].append(("video", file_id))
+    elif update.message.text and update.message.text.lower() != "готово":
+        context.user_data["broadcast_text"] += update.message.text + "\n"
+    elif update.message.text and update.message.text.lower() == "готово":
+        # Предпросмотр
+        text = context.user_data.get("broadcast_text", "").strip()
+        media = context.user_data.get("broadcast_media", [])
+        preview = "📢 Предпросмотр рассылки:\n"
+        if text:
+            preview += f"\n{text}\n"
+        if media:
+            preview += f"\n[Медиа: {len(media)} файла(ов)]"
+        await update.message.reply_text(preview)
+        await update.message.reply_text("Отправить рассылку? (Да/Нет)")
+        return BROADCAST_CONFIRM
+    else:
+        await update.message.reply_text("Пожалуйста, отправь текст, фото или видео.")
+        return BROADCAST_CONTENT
+
+    return BROADCAST_CONTENT
+
+async def broadcast_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.text.lower() != "да":
+        await update.message.reply_text("Рассылка отменена.")
+        return ConversationHandler.END
+
+    tags = context.user_data.get("broadcast_tags", [])
+    users = get_users_by_tags(tags)
+    text = context.user_data.get("broadcast_text", "").strip()
+    media = context.user_data.get("broadcast_media", [])
+
+    count = 0
+    for user_id in users:
+        try:
+            if media:
+                if len(media) == 1:
+                    mtype, file_id = media[0]
+                    if mtype == "photo":
+                        await context.bot.send_photo(chat_id=user_id, photo=file_id, caption=text or None)
+                    elif mtype == "video":
+                        await context.bot.send_video(chat_id=user_id, video=file_id, caption=text or None)
+                else:
+                    media_group = []
+                    for mtype, file_id in media:
+                        if mtype == "photo":
+                            media_group.append(InputMediaPhoto(file_id))
+                        elif mtype == "video":
+                            media_group.append(InputMediaVideo(file_id))
+                    await context.bot.send_media_group(chat_id=user_id, media=media_group)
+                    if text:
+                        await context.bot.send_message(chat_id=user_id, text=text)
+            else:
+                await context.bot.send_message(chat_id=user_id, text=text)
+            count += 1
+        except Exception as e:
+            continue
+    await update.message.reply_text(f"Рассылка завершена. Отправлено {count} пользователям.")
+    return ConversationHandler.END
+
+# --- /export_users выгрузка базы ---
+async def export_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not is_admin(user):
+        await update.message.reply_text("Нет доступа.")
+        return
+    filename = export_users_csv()
+    await update.message.reply_document(open(filename, "rb"))
+
+# --- /stats статистика по тегам ---
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    if not is_admin(user):
+        await update.message.reply_text("Нет доступа.")
+        return
+    stats = get_tag_stats()
+    if not stats:
+        await update.message.reply_text("Пока нет данных по тегам.")
+        return
+    msg = "📊 Статистика по тегам:\n"
+    for tag, count in stats.items():
+        msg += f"{tag}: {count}\n"
+    await update.message.reply_text(msg)
 
 # --- Опросник ---
 
@@ -333,8 +518,26 @@ def main():
         ]
     )
 
+    # --- ConversationHandler для рассылки ---
+    broadcast_conv = ConversationHandler(
+        entry_points=[CommandHandler("broadcast", broadcast_start)],
+        states={
+            BROADCAST_TAGS: [MessageHandler(filters.TEXT & ~filters.COMMAND, broadcast_tags)],
+            BROADCAST_CONTENT: [
+                MessageHandler(filters.PHOTO | filters.VIDEO | filters.TEXT & ~filters.COMMAND, broadcast_content),
+            ],
+            BROADCAST_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, broadcast_confirm)],
+        },
+        fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
+        allow_reentry=True
+    )
+
     app.add_handler(conv_handler)
     app.add_handler(CommandHandler('help', help_command))
+    app.add_handler(CommandHandler("admin", admin_menu))
+    app.add_handler(broadcast_conv)
+    app.add_handler(CommandHandler("export_users", export_users))
+    app.add_handler(CommandHandler("stats", stats))
     app.run_polling()
 
 if __name__ == '__main__':
