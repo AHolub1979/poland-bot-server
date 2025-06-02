@@ -12,7 +12,7 @@ from telegram.ext import (
 ADMIN_USERNAMES = ["Anastasia_Kulesh", "belarus79"]
 
 # Состояния опроса
-(Q1, Q2, Q3, Q4, Q5, Q6, Q7, Q_DATES, Q_DATES_MORE, FINAL, QUESTION) = range(11)
+(Q1, Q2, Q3, Q4, Q5, Q6, Q7, Q_DATES, Q_DATES_MORE, FINAL, QUESTION, Q4_POLICEAL) = range(12)
 # Состояния для рассылки
 (BROADCAST_TAGS, BROADCAST_CONTENT, BROADCAST_CONFIRM) = range(100, 103)
 
@@ -280,6 +280,10 @@ async def q1(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Если остались вопросы — пиши или звони: {CONSULT_PHONE} 📞",
             reply_markup=ReplyKeyboardRemove()
         )
+        await update.message.reply_text(
+            "Если хочешь узнать остальные требования — напиши 'Продолжить'."
+        )
+        context.user_data["fail_continue"] = True
         return FINAL
     else:
         context.user_data["tags"].append("ok_stay_years")
@@ -340,6 +344,10 @@ async def after_dates(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Максимальный один выезд: {max_trip} дней\n"
             f"Если есть вопросы — пиши или звони: {CONSULT_PHONE} 📞"
         )
+        await update.message.reply_text(
+            "Если хочешь узнать остальные требования — напиши 'Продолжить'."
+        )
+        context.user_data["fail_continue"] = True
         return FINAL
     else:
         context.user_data["tags"].append("ok_stay")
@@ -400,16 +408,29 @@ async def q5(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"😔 К сожалению, при длительных перерывах с доходом могут быть сложности. Рекомендуем проконсультироваться с экспертом.\n"
             f"Пиши или звони: {CONSULT_PHONE} 📞"
         )
+        await update.message.reply_text(
+            "Если хочешь узнать остальные требования — напиши 'Продолжить'."
+        )
+        context.user_data["fail_continue"] = True
         return FINAL
 
 async def q4(update: Update, context: ContextTypes.DEFAULT_TYPE):
     answer = update.message.text
-    if answer in [
-        "Сертификат B1 или выше",
-        "Окончил ВУЗ в Польше на польском",
-        "Окончил другое учебное заведение в Польше"
-    ]:
+    if answer == "Сертификат B1 или выше" or answer == "Окончил ВУЗ в Польше на польском":
         context.user_data["tags"].append("ok_language")
+        await update.message.reply_text(
+            "🏠 У тебя есть жильё в собственности или официальная аренда?",
+            reply_markup=ReplyKeyboardMarkup([
+                ["Жильё в собственности"], ["Аренда жилья"], ["Ничего нет"]
+            ], one_time_keyboard=True, resize_keyboard=True)
+        )
+        return Q6
+    elif answer == "Окончил другое учебное заведение в Польше":
+        context.user_data["tags"].append("ok_language")
+        await update.message.reply_text(
+            "Обратите внимание, важно чтобы свидетельство об окончании полицеальной школы было выдано до 30.06.2025 г, а податься на карту резидента нужно успеть до 30.06.2026 г.\n"
+            "Если не успеваете по этим датам, то придется сдать экзамен."
+        )
         await update.message.reply_text(
             "🏠 У тебя есть жильё в собственности или официальная аренда?",
             reply_markup=ReplyKeyboardMarkup([
@@ -423,6 +444,10 @@ async def q4(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Быстрее и эффективнее всего будет сдать государственный экзамен. Вот ссылка на официальный сайт госэкзамена: https://certyfikatpolski.pl/ 🇵🇱",
             reply_markup=ReplyKeyboardRemove()
         )
+        await update.message.reply_text(
+            "Если хочешь узнать остальные требования — напиши 'Продолжить'."
+        )
+        context.user_data["fail_continue"] = True
         return FINAL
 
 async def q6(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -445,6 +470,10 @@ async def q6(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Вам нужна официальная аренда жилья с договором. Рекомендуем проконсультироваться с экспертом.\n"
             f"Пиши или звони: {CONSULT_PHONE} 📞"
         )
+        await update.message.reply_text(
+            "Если хочешь узнать остальные требования — напиши 'Продолжить'."
+        )
+        context.user_data["fail_continue"] = True
         return FINAL
 
 async def q7(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -455,10 +484,25 @@ async def q7(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def final(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    city = update.message.text if update.message else ""
-    if city and not city.startswith("/"):
-        update_user_city(user.id, city)
+    text = update.message.text if update.message else ""
     tags = context.user_data.get("tags", [])
+    if text and text.lower() == "продолжить" and context.user_data.get("fail_continue"):
+        context.user_data["fail_continue"] = False
+        await update.message.reply_text(
+            "Вот основные требования для подачи на карту резидента ЕС:\n"
+            "1. Проживание в Польше не менее 5 лет\n"
+            "2. Не более 304 дней вне Польши за 5 лет, не более 183 дней за одну поездку\n"
+            "3. Стабильный официальный доход за последние 3 года\n"
+            "4. Подтверждение знания польского языка не ниже B1\n"
+            "5. Официальное жильё (собственность или аренда)\n"
+            "6. Страховка (ZUS или частная)\n"
+            f"Если по какому-то пункту есть вопросы — пиши или звони: {CONSULT_PHONE} 📞"
+        )
+        return ConversationHandler.END
+
+    city = text if text and not text.startswith("/") else ""
+    if city:
+        update_user_city(user.id, city)
     save_user(user, ",".join(tags))
     if "early" in tags or "fail_stay" in tags or "fail_income" in tags or "fail_language" in tags or "fail_housing" in tags:
         await update.message.reply_text(
@@ -476,7 +520,6 @@ async def handle_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     text = update.message.text
     save_user(user)
-    # Переслать вопрос в админ-чат
     msg = (
         f"❓ Вопрос вне сценария!\n"
         f"От: @{user.username or '-'} (ID: {user.id})\n"
@@ -518,7 +561,6 @@ def main():
         ]
     )
 
-    # --- ConversationHandler для рассылки ---
     broadcast_conv = ConversationHandler(
         entry_points=[CommandHandler("broadcast", broadcast_start)],
         states={
