@@ -8,21 +8,12 @@ from telegram.ext import (
     ConversationHandler, ContextTypes
 )
 
-# --- Админы по username ---
 ADMIN_USERNAMES = ["Anastasia_Kulesh", "belarus79"]
-
-# Состояния опроса
 (Q1, Q2, Q3, Q4, Q5, Q6, Q7, Q_DATES, Q_DATES_MORE, FINAL, QUESTION, Q4_POLICEALNA) = range(12)
-# Состояния для рассылки
 (BROADCAST_TAGS, BROADCAST_CONTENT, BROADCAST_CONFIRM) = range(100, 103)
-
-# ID чата для заявок
 ADMIN_CHAT_ID = -1002562481191
-
-# Телефон для консультаций
 CONSULT_PHONE = "+48 791 787 071"
 
-# --- База пользователей ---
 def init_db():
     conn = sqlite3.connect("users.db")
     c = conn.cursor()
@@ -125,11 +116,9 @@ def get_tag_stats():
     conn.close()
     return tag_counts
 
-# --- Проверка, админ ли пользователь ---
 def is_admin(user):
     return (user.username in ADMIN_USERNAMES)
 
-# --- Админ-панель ---
 async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not is_admin(user):
@@ -142,7 +131,6 @@ async def admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/stats — статистика по тегам"
     )
 
-# --- /broadcast рассылка ---
 async def broadcast_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not is_admin(user):
@@ -176,7 +164,6 @@ async def broadcast_content(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif update.message.text and update.message.text.lower() != "готово":
         context.user_data["broadcast_text"] += update.message.text + "\n"
     elif update.message.text and update.message.text.lower() == "готово":
-        # Предпросмотр
         text = context.user_data.get("broadcast_text", "").strip()
         media = context.user_data.get("broadcast_media", [])
         preview = "📢 Предпросмотр рассылки:\n"
@@ -231,7 +218,6 @@ async def broadcast_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Рассылка завершена. Отправлено {count} пользователям.")
     return ConversationHandler.END
 
-# --- /export_users выгрузка базы ---
 async def export_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not is_admin(user):
@@ -240,7 +226,6 @@ async def export_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
     filename = export_users_csv()
     await update.message.reply_document(open(filename, "rb"))
 
-# --- /stats статистика по тегам ---
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not is_admin(user):
@@ -254,8 +239,6 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for tag, count in stats.items():
         msg += f"{tag}: {count}\n"
     await update.message.reply_text(msg)
-
-# --- Опросник ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -281,7 +264,7 @@ async def q1(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=ReplyKeyboardRemove()
         )
         return FINAL
-    else:
+    elif answer == "5 лет и более":
         context.user_data["tags"].append("ok_stay_years")
         await update.message.reply_text(
             "📅 За последние 5 лет ты был(-а) за пределами Польши?\n"
@@ -295,6 +278,8 @@ async def q1(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         context.user_data["dates"] = []
         return Q_DATES
+    else:
+        return await handle_question(update, context)
 
 async def q_dates(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
@@ -318,8 +303,7 @@ async def q_dates(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Период добавлен! Если есть ещё выезды — введи следующий. Если всё — напиши 'Готово'.")
             return Q_DATES
         except Exception:
-            await update.message.reply_text("Неверный формат. Введи даты так: дд.мм.гггг - дд.мм.гггг")
-            return Q_DATES
+            return await handle_question(update, context)
 
 async def after_dates(update: Update, context: ContextTypes.DEFAULT_TYPE):
     periods = context.user_data.get("dates", [])
@@ -330,7 +314,6 @@ async def after_dates(update: Update, context: ContextTypes.DEFAULT_TYPE):
         total_days += days
         if days > max_trip:
             max_trip = days
-    # Критерии: не более 304 дней всего, не более 183 дней за раз
     if total_days > 304 or max_trip > 183:
         context.user_data["tags"].append("fail_stay")
         save_user(update.effective_user, ",".join(context.user_data["tags"]))
@@ -372,7 +355,7 @@ async def q3(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ], one_time_keyboard=True, resize_keyboard=True)
         )
         return Q5
-    else:  # Были перерывы
+    elif answer == "Были перерывы":
         context.user_data["tags"].append("fail_income")
         await update.message.reply_text(
             "Как долго длились перерывы?",
@@ -381,6 +364,8 @@ async def q3(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ], one_time_keyboard=True, resize_keyboard=True)
         )
         return Q5
+    else:
+        return await handle_question(update, context)
 
 async def q5(update: Update, context: ContextTypes.DEFAULT_TYPE):
     answer = update.message.text
@@ -395,12 +380,14 @@ async def q5(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ], one_time_keyboard=True, resize_keyboard=True)
         )
         return Q4
-    else:
+    elif answer in ["Полгода", "Год", "Вообще не было дохода"]:
         await update.message.reply_text(
             f"😔 К сожалению, при длительных перерывах с доходом могут быть сложности. Рекомендуем проконсультироваться с экспертом.\n"
             f"Пиши или звони: {CONSULT_PHONE} 📞"
         )
         return FINAL
+    else:
+        return await handle_question(update, context)
 
 async def q4(update: Update, context: ContextTypes.DEFAULT_TYPE):
     answer = update.message.text
@@ -426,13 +413,15 @@ async def q4(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ], one_time_keyboard=True, resize_keyboard=True)
         )
         return Q4_POLICEALNA
-    else:
+    elif answer == "Нет подтверждения":
         context.user_data["tags"].append("fail_language")
         await update.message.reply_text(
             "Быстрее и эффективнее всего будет сдать государственный экзамен. Вот ссылка на официальный сайт госэкзамена: https://certyfikatpolski.pl/ 🇵🇱",
             reply_markup=ReplyKeyboardRemove()
         )
         return FINAL
+    else:
+        return await handle_question(update, context)
 
 async def q4_policealna(update: Update, context: ContextTypes.DEFAULT_TYPE):
     answer = update.message.text
@@ -456,8 +445,7 @@ async def q4_policealna(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return Q6
     else:
-        await update.message.reply_text("Пожалуйста, выбери один из вариантов.")
-        return Q4_POLICEALNA
+        return await handle_question(update, context)
 
 async def q6(update: Update, context: ContextTypes.DEFAULT_TYPE):
     answer = update.message.text
@@ -473,44 +461,57 @@ async def q6(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ], one_time_keyboard=True, resize_keyboard=True)
         )
         return Q7
-    else:
+    elif answer == "Ничего нет":
         context.user_data["tags"].append("fail_housing")
         await update.message.reply_text(
             f"Вам нужна официальная аренда жилья с договором. Рекомендуем проконсультироваться с экспертом.\n"
             f"Пиши или звони: {CONSULT_PHONE} 📞"
         )
         return FINAL
+    else:
+        return await handle_question(update, context)
 
 async def q7(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🏙️ Из какого ты города? Напиши название города."
-    )
-    return FINAL
+    answer = update.message.text
+    if answer in [
+        "Да, я официально работаю",
+        "Да, я предприниматель",
+        "Зарегистрирован в ЗУС к члену семьи",
+        "Есть частная страховка"
+    ]:
+        await update.message.reply_text(
+            "🏙️ Из какого ты города? Напиши название города."
+        )
+        return FINAL
+    else:
+        return await handle_question(update, context)
 
 async def final(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     city = update.message.text if update.message else ""
-    if city and not city.startswith("/"):
+    # Проверяем, что это действительно город (не команда, не вопрос)
+    if city and not city.startswith("/") and len(city) > 1 and all(x.isalpha() or x in " -'" for x in city):
         update_user_city(user.id, city)
-    tags = context.user_data.get("tags", [])
-    save_user(user, ",".join(tags))
-    if "early" in tags or "fail_stay" in tags or "fail_income" in tags or "fail_language" in tags or "fail_housing" in tags:
-        await update.message.reply_text(
-            f"Спасибо за обращение! Если появятся вопросы — пиши или звони: {CONSULT_PHONE} 📞"
-        )
+        tags = context.user_data.get("tags", [])
+        save_user(user, ",".join(tags))
+        if "early" in tags or "fail_stay" in tags or "fail_income" in tags or "fail_language" in tags or "fail_housing" in tags:
+            await update.message.reply_text(
+                f"Спасибо за обращение! Если появятся вопросы — пиши или звони: {CONSULT_PHONE} 📞"
+            )
+        else:
+            await update.message.reply_text(
+                f"🎉 Поздравляю! Ты можешь подаваться на карту резидента ЕС.\n"
+                f"Если нужна помощь с документами или консультация — пиши или звони: {CONSULT_PHONE} 📞"
+            )
+        return ConversationHandler.END
     else:
-        await update.message.reply_text(
-            f"🎉 Поздравляю! Ты можешь подаваться на карту резидента ЕС.\n"
-            f"Если нужна помощь с документами или консультация — пиши или звони: {CONSULT_PHONE} 📞"
-        )
-    return ConversationHandler.END
+        # Любой другой текст — это вопрос или комментарий
+        return await handle_question(update, context)
 
-# --- Автоответчик и пересылка вопросов в чат ---
 async def handle_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     text = update.message.text
     save_user(user)
-    # Переслать вопрос в админ-чат
     msg = (
         f"❓ Вопрос вне сценария!\n"
         f"От: @{user.username or '-'} (ID: {user.id})\n"
@@ -523,7 +524,6 @@ async def handle_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return ConversationHandler.END
 
-# --- Команда /help ---
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Я помогу тебе узнать, можешь ли ты подать на карту резидента ЕС в Польше 🇵🇱\n"
@@ -553,7 +553,6 @@ def main():
         ]
     )
 
-    # --- ConversationHandler для рассылки ---
     broadcast_conv = ConversationHandler(
         entry_points=[CommandHandler("broadcast", broadcast_start)],
         states={
