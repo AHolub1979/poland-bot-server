@@ -9,7 +9,7 @@ from telegram.ext import (
 )
 
 ADMIN_USERNAMES = ["Anastasia_Kulesh", "belarus79"]
-(Q1, Q2, Q3, Q4, Q5, Q6, Q7, Q_DATES, Q_DATES_MORE, FINAL, QUESTION) = range(11)
+(Q1, Q2, Q3, Q4, Q5, Q6, Q7, Q_DATES, Q_DATES_MORE, FINAL, QUESTION, Q4_LANGUAGE_CONTINUE) = range(12)
 (BROADCAST_TAGS, BROADCAST_CONTENT, BROADCAST_CONFIRM) = range(100, 103)
 ADMIN_CHAT_ID = -1002562481191
 CONSULT_PHONE = "+48 791 787 071"
@@ -406,22 +406,34 @@ async def q4(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif answer == "Окончил полицеальную школу":
         context.user_data["tags"].append("ok_language")
         await update.message.reply_text(
-            "❗️ Важно: свидетельство об окончании полицеальной школы принимается только если оно выдано до 30.06.2025 г. Податься на карту резидента нужно до 30.06.2026 г. Если не успеваешь — потребуется сдать экзамен B1.\n\n"
-            "🏠 У тебя есть жильё в собственности или официальная аренда?",
+            "❗️ Важно: свидетельство об окончании полицеальной школы принимается только если оно выдано до 30.06.2025 г. Податься на карту резидента нужно до 30.06.2026 г.\n\n"
+            "Если не успеваешь — потребуется сдать государственный экзамен B1.\n"
+            "Можно пройти подготовительные курсы и сдать экзамен. Подробнее: https://certyfikatpolski.pl/ 🇵🇱",
             reply_markup=ReplyKeyboardMarkup([
-                ["Жильё в собственности"], ["Аренда жилья"], ["Ничего нет"]
+                ["Продолжить"]
             ], one_time_keyboard=True, resize_keyboard=True)
         )
-        return Q6
+        return Q4_LANGUAGE_CONTINUE
     elif answer == "Нет подтверждения":
         context.user_data["tags"].append("fail_language")
         await update.message.reply_text(
             "Быстрее и эффективнее всего будет сдать государственный экзамен. Вот ссылка на официальный сайт госэкзамена: https://certyfikatpolski.pl/ 🇵🇱",
-            reply_markup=ReplyKeyboardRemove()
+            reply_markup=ReplyKeyboardMarkup([
+                ["Продолжить"]
+            ], one_time_keyboard=True, resize_keyboard=True)
         )
-        return FINAL
+        return Q4_LANGUAGE_CONTINUE
     else:
         return await handle_question(update, context)
+
+async def q4_language_continue(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "🏠 У тебя есть жильё в собственности или официальная аренда?",
+        reply_markup=ReplyKeyboardMarkup([
+            ["Жильё в собственности"], ["Аренда жилья"], ["Ничего нет"]
+        ], one_time_keyboard=True, resize_keyboard=True)
+    )
+    return Q6
 
 async def q6(update: Update, context: ContextTypes.DEFAULT_TYPE):
     answer = update.message.text
@@ -486,15 +498,21 @@ async def handle_question(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     text = update.message.text
     save_user(user)
+    # Сообщение админу
     msg = (
-        f"❓ Вопрос вне сценария!\n"
+        f"❓ Новый вопрос вне сценария!\n"
         f"От: @{user.username or '-'} (ID: {user.id})\n"
         f"Имя: {user.first_name or ''} {user.last_name or ''}\n"
         f"Вопрос: {text}"
     )
-    await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=msg)
+    try:
+        await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=msg)
+    except Exception:
+        pass
+    # Сообщение пользователю
     await update.message.reply_text(
-        "Спасибо за вопрос! Мы получили его и скоро свяжемся с вами. ☎️"
+        f"Спасибо за ваш вопрос! Мы получили его и обязательно свяжемся с вами, как только будет возможность.\n"
+        f"Если вопрос срочный — напишите или позвоните: {CONSULT_PHONE} 📞"
     )
     return ConversationHandler.END
 
@@ -516,6 +534,7 @@ def main():
             Q_DATES: [MessageHandler(filters.TEXT & ~filters.COMMAND, q_dates)],
             Q3: [MessageHandler(filters.TEXT & ~filters.COMMAND, q3)],
             Q4: [MessageHandler(filters.TEXT & ~filters.COMMAND, q4)],
+            Q4_LANGUAGE_CONTINUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, q4_language_continue)],
             Q5: [MessageHandler(filters.TEXT & ~filters.COMMAND, q5)],
             Q6: [MessageHandler(filters.TEXT & ~filters.COMMAND, q6)],
             Q7: [MessageHandler(filters.TEXT & ~filters.COMMAND, q7)],
